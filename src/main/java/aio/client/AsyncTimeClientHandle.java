@@ -1,0 +1,110 @@
+package aio.client;
+
+import constant.Const;
+
+import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.channels.AsynchronousSocketChannel;
+import java.nio.channels.CompletionHandler;
+import java.util.concurrent.CountDownLatch;
+
+/**
+ * @ClassName AsyncTimeClientHandle
+ * @Description //TODO
+ * @Date 2019/5/16 18:48
+ * @Author jszhang@wisedu
+ * @Version 1.0
+ **/
+public class AsyncTimeClientHandle implements CompletionHandler<Void, AsyncTimeClientHandle>, Runnable {
+
+    private AsynchronousSocketChannel client;
+    private String host;
+    private int port;
+    private CountDownLatch latch;
+
+    public AsyncTimeClientHandle(String host, int port) {
+        this.host = host;
+        this.port = port;
+        try {
+            client = AsynchronousSocketChannel.open();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void run() {
+        latch = new CountDownLatch(1);
+        client.connect(new InetSocketAddress(host,port),this,this);
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        try {
+            client.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void completed(Void result, AsyncTimeClientHandle attachment) {
+        byte[] req = Const.Order.QUERY_TIME_ORDER.name().getBytes();
+        ByteBuffer writeBuffer = ByteBuffer.allocate(req.length);
+        writeBuffer.put(req);
+        writeBuffer.flip();
+        client.write(writeBuffer, writeBuffer, new CompletionHandler<Integer, ByteBuffer>() {
+            @Override
+            public void completed(Integer result, ByteBuffer attachment) {
+                if(writeBuffer.hasRemaining()){
+                    client.write(writeBuffer,writeBuffer,this);
+                }else {
+                    ByteBuffer readBuffer = ByteBuffer.allocate(1024);
+                    client.read(readBuffer, readBuffer, new CompletionHandler<Integer, ByteBuffer>() {
+                        @Override
+                        public void completed(Integer result, ByteBuffer buffer) {
+                            buffer.flip();
+                            byte[] bytes = new byte[buffer.remaining()];
+                            buffer.get(bytes);
+                            String body;
+                            try {
+                                body = new String(bytes,"UTF-8");
+                                System.out.println("now is :"+body);
+                                latch.countDown();
+                            } catch (UnsupportedEncodingException e) {
+                                e.printStackTrace();
+                            }
+                        }
+
+                        @Override
+                        public void failed(Throwable exc, ByteBuffer attachment) {
+                            try {
+                                client.close();
+                                latch.countDown();
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                    });
+                }
+            }
+
+            @Override
+            public void failed(Throwable exc, ByteBuffer attachment) {
+
+            }
+        });
+    }
+
+    @Override
+    public void failed(Throwable exc, AsyncTimeClientHandle attachment) {
+
+    }
+
+    public static void main(String[] args) {
+        System.out.println(Const.Order.QUERY_TIME_ORDER.name());
+    }
+}
